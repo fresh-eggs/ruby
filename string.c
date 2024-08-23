@@ -4345,6 +4345,22 @@ rb_str_byteindex_m(int argc, VALUE *argv, VALUE str)
     return Qnil;
 }
 
+static void*
+rb_memrchr(const char *search_str, int chr, long search_len)
+{
+    if (search_len <= 0) return ((void *)0);
+
+    size_t search_str_sz = strlen(search_str);
+    size_t boundary = search_str_sz - search_len;
+    for (size_t i = search_str_sz; i >= 0; i--)
+    {
+        if (search_str[i] == chr) return (void *)&search_str[i];
+        if (i <= boundary) break;
+    }
+
+    return ((void *)0);
+}
+
 #ifdef HAVE_MEMRCHR
 static long
 str_rindex(VALUE str, VALUE sub, const char *s, rb_encoding *enc)
@@ -4381,21 +4397,35 @@ str_rindex(VALUE str, VALUE sub, const char *s, rb_encoding *enc)
 static long
 str_rindex(VALUE str, VALUE sub, const char *s, rb_encoding *enc)
 {
-    long slen;
+    char *hit, *adjusted;
+    int c;
+    long slen, searchlen;
     char *sbeg, *e, *t;
 
     sbeg = RSTRING_PTR(str);
+    slen = RSTRING_LEN(sub);
+    if (slen == 0) return s - sbeg;
     e = RSTRING_END(str);
     t = RSTRING_PTR(sub);
-    slen = RSTRING_LEN(sub);
+    c = *t & 0xff;
+    searchlen = s - sbeg + 1;
 
-    while (s) {
-        if (memcmp(s, t, slen) == 0) {
-            return s - sbeg;
-        }
-        if (s <= sbeg) break;
-        s = rb_enc_prev_char(sbeg, s, e, enc);
+    if (memcmp(s, t, slen) == 0) {
+      return s - sbeg;
     }
+
+    do {
+        hit = rb_memrchr(sbeg, c, searchlen);
+        if (!hit) break;
+        adjusted = rb_enc_left_char_head(sbeg, hit, e, enc);
+        if (hit != adjusted) {
+            searchlen = adjusted - sbeg;
+            continue;
+        }
+        if (memcmp(hit, t, slen) == 0)
+            return hit - sbeg;
+        searchlen = adjusted - sbeg;
+    } while (searchlen > 0);
 
     return -1;
 }
@@ -4405,6 +4435,7 @@ str_rindex(VALUE str, VALUE sub, const char *s, rb_encoding *enc)
 static long
 rb_str_rindex(VALUE str, VALUE sub, long pos)
 {
+    // pos = search_str length
     long len, slen;
     char *sbeg, *s;
     rb_encoding *enc;
@@ -4418,11 +4449,13 @@ rb_str_rindex(VALUE str, VALUE sub, long pos)
 
     /* substring longer than string */
     if (len < slen) return -1;
+    // offsets pos one substring len into the search string
     if (len - pos < slen) pos = len - slen;
     if (len == 0) return pos;
 
     sbeg = RSTRING_PTR(str);
 
+    // string is size of substring
     if (pos == 0) {
         if (memcmp(sbeg, RSTRING_PTR(sub), RSTRING_LEN(sub)) == 0)
             return 0;
@@ -4430,7 +4463,11 @@ rb_str_rindex(VALUE str, VALUE sub, long pos)
             return -1;
     }
 
+    // get pointer to char at current pos into the
+    // search string
     s = str_nth(sbeg, RSTRING_END(str), pos, enc, singlebyte);
+
+    // do substring matching starting at search_string - sub_len
     return str_rindex(str, sub, s, enc);
 }
 
