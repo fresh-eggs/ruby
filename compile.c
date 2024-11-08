@@ -3390,6 +3390,28 @@ iseq_peephole_optimize(rb_iseq_t *iseq, LINK_ELEMENT *list, const int do_tailcal
     }
 
     /*
+     * setlocal 3, 0
+     * getlocal 3, 0
+     *
+     * =>
+     *
+     * dup
+     * setlocal 3, 0
+     */
+    if (IS_INSN_ID(iobj, setlocal)) {
+        LINK_ELEMENT *next = iobj->link.next;
+        if (IS_INSN(next) && IS_INSN_ID(next, getlocal)) {
+            if ((OPERAND_AT(iobj, 0) == OPERAND_AT(next, 0)) && 
+                    (OPERAND_AT(iobj, 1) == OPERAND_AT(next, 1))) {
+                INSN *next_insn = (INSN *) iobj->link.next;
+                iobj->insn_id = BIN(dup);
+                iobj->operand_size = 0;
+                next_insn->insn_id = BIN(setlocal);
+            }
+        }
+    }
+
+    /*
      *  ...
      *  duparray [...]
      *  concatarray | concattoarray
